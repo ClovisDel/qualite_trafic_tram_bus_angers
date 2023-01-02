@@ -8,6 +8,8 @@ from streamlit_folium import folium_static
 import io
 import pickle
 
+from PIL import Image
+
 #from gsheetsdb import connect
 
 from methodes_angers_bus_tram import *
@@ -38,7 +40,7 @@ from methodes_angers_bus_tram import *
 #    df_fichier_pour_pred_ML1 = pd.read_excel("C:/Users/clovi/Documents/GitHub/qualite_trafic_tram_bus_angers/fichier_pour_pred_ML1.xlsx")
 #    return df_global, df_propre, df_meteo, df_arret, df_result_ML, df_fichier_pour_pred_ML1
 
-@st.cache(suppress_st_warning=True)
+@st.cache(suppress_st_warning=True, allow_output_mutation=True)
 def load_data():
     df_global_url = "https://drive.google.com/file/d/1DMJGzA92Mwyp0-nS5LSMWZ4lCoMLzLQ4/view?usp=sharing"
     file_id=df_global_url.split('/')[-2]
@@ -52,6 +54,7 @@ def load_data():
     #st.write(dwn_url)
     df_propre = pd.read_csv(dwn_url)
     df_propre = df_propre.astype({"horodatage": "datetime64", 
+                "horodatage_fichier": "datetime64",
                 "Heure_estimee_de_passage_a_L_arret": "datetime64", 
                 "date_heure" : "datetime64", 
                 "date": "datetime64",
@@ -76,13 +79,19 @@ def load_data():
     #st.write(dwn_url)
     df_result_ML = pd.read_csv(dwn_url)
 
+    df_result_ML_2_path = "https://drive.google.com/file/d/19s6q9A6ETrVLQv2uwH-eiZ8rVn9x3xDG/view?usp=sharing"
+    file_id=df_result_ML_2_path.split('/')[-2]
+    dwn_url='https://drive.google.com/uc?id=' + file_id
+    #st.write(dwn_url)
+    df_result_ML_2 = pd.read_csv(dwn_url)
+
     df_fichier_pour_pred_ML1_path = "https://drive.google.com/file/d/1nWa7KL5QVXccubvFHJe-HQ2n8XuJT6nL/view?usp=sharing"
     file_id=df_fichier_pour_pred_ML1_path.split('/')[-2]
     dwn_url='https://drive.google.com/uc?id=' + file_id
     #st.write(dwn_url)
     df_fichier_pour_pred_ML1 = pd.read_csv(dwn_url, sep=";")
 
-    return df_global, df_propre, df_meteo, df_arret, df_result_ML, df_fichier_pour_pred_ML1
+    return df_global, df_propre, df_meteo, df_arret, df_result_ML, df_result_ML_2, df_fichier_pour_pred_ML1
 
 def load_model():
     pickle_path = "Model_1_full_regressor.pkl"
@@ -90,24 +99,31 @@ def load_model():
         Pickled_LR_Model = pickle.load(file)
     return Pickled_LR_Model
 
+def load_model2():
+    pickle_path = "Model_2_full_regressor.pkl"
+    with open(pickle_path, 'rb') as file:  
+        Pickled_LR_Model2 = pickle.load(file)
+    return Pickled_LR_Model2
+
 def angers_bus_tram_IHM(): 
     st.set_page_config(layout="wide")
     
-    df_global, df_propre, df_meteo, df_arret, df_result_ML, df_fichier_pour_pred_ML1= load_data()
+    df_global, df_propre, df_meteo, df_arret, df_result_ML, df_result_ML_2, df_fichier_pour_pred_ML1= load_data()
 
     st.sidebar.title("Menu")
-    menu = ["Accueil", "API & Features Engineering", "Analyse base consolidée", "Prediction de la qualité du trafic"]
+    menu = ["Accueil", "API & Features Engineering", "Analyse base consolidée", "Prediction de la qualité du trafic (par jour)", "Prediction de la qualité du trafic (par ligne)"]
     choix = st.sidebar.selectbox("Choix", menu)
 
     if choix == "Accueil":
         accueil()
     elif choix == "API & Features Engineering":
-        api(df_global, df_meteo, )
+        api(df_global, df_meteo, df_propre)
     elif choix == "Analyse base consolidée":
         analyse_base_conso(df_propre, df_arret)
-    elif choix == "Prediction de la qualité du trafic":
+    elif choix == "Prediction de la qualité du trafic (par jour)":
         prediction_qualite_traffic(df_propre, df_result_ML, df_fichier_pour_pred_ML1)
-    
+    elif choix == "Prediction de la qualité du trafic (par ligne)":
+        prediction_qualite_traffic_par_ligne(df_propre, df_result_ML_2, df_fichier_pour_pred_ML1)
 
 def accueil():
     st.header("Projet Simulation")
@@ -119,9 +135,9 @@ def accueil():
         "dans un second temps une base consolidées des requêtes de l'API.")
     st.write("Dans un premier temps, nous avons étudiés nos données dans l'objectif de faire resortir les informations importantes.")
     st.write("Dans un second temps, nous avons mis en place plusieurs modèles de machine learning pour prédire la qualité du traffic.")    
+    st.write("La source principale de données est [ici](https://data.angers.fr/explore/dataset/bus-tram-position-tr/information/)")
 
-
-def api(df_global, df_meteo):
+def api(df_global, df_meteo, df_propre):
     df_api = request_api_tram()
     st.header("API & Features Engineering")
     st.write("### 1 - Récolte des données depuis l'API de la ville d'Angers ")
@@ -260,6 +276,21 @@ df["jour_semaine"] = df["date"].dt.day_name().map({"Monday": "Lundi", "Tuesday":
     st.write("#### 2.5 - Sauvegarde du dataframe")
     st.write("Avec l'ensemble de ses modifications, on arrive à un dataframe de *61 variables* pour *739 410 observations* près à l'utilisation.")
 
+    st.write("#### 3 - Analyse du biais de nos données")
+    st.write("Examinons la fréquence des requêtes à la base de données, et leurs décalages avec l'envoie des informations du bus vers l'API.")
+
+    fig_ecart_horodatage = ecart_horodatage(df_propre)
+    st.plotly_chart(fig_ecart_horodatage)
+
+    st.write("On remarque qu'il y a eu moins de requêtes à l'API le samedi et le dimanche. Mais aussi une différence de fréquence de requête globale augmenté à partir de Septembre.")
+    st.write("Cela peut être expliqué de la manière suivante : pour économiser du stockage, les requêtes lors des périodes de haut trafic ont été priviliégés.")
+    st.write("En effet, si 100% des bus sont à l'heure le dimanche, la perception du retard ne sera quasiment pas impacté. tandis que si un bus contenant l'ensemble des voyageurs est en retard alors la perception du retard fortement impacté, même avec 99% des bus à l'heure.")
+
+    st.write("Regardons les écarts entre l'horodatage de l'API et l'horodatage du fichier")
+    fig_ecart_horo_fichier = distrib_ecart_horo_fichier(df_propre)
+    st.plotly_chart(fig_ecart_horo_fichier)
+    st.write("Le nombre de lignes dont l'écart est supérieur à 1h entre l'horodatage du bus et l'horodatage de la requetes à l'API est totalement négligable.")
+
 def analyse_base_conso(df_propre, df_arret):
     st.header("Analyse de la base consolidée")
 
@@ -281,7 +312,6 @@ def analyse_base_conso(df_propre, df_arret):
     st.write("### 2 - Analyse des retards / avances => écart horaire en secondes")
     
     st.write("Globalement on remarque que quasiment 2/3 des véhicules sont en retard.")
-    st.write("Ce qui reste cependant intriguant est le fait que 1/5 des bus soient en avance, ce qui ne devrait pas être le cas.")
     fig_pie_ecart = pie_ecart(df_propre)
     st.plotly_chart(fig_pie_ecart)
 
@@ -326,6 +356,10 @@ def analyse_base_conso(df_propre, df_arret):
     fig_heatmap_ecart = heatmap_ecart(df_propre)
     st.plotly_chart(fig_heatmap_ecart)
 
+    st.write("En continuant dans l'analyse des écarts, on peut s'intéresser à l'impact de la météo sur les écarts.")
+    st.write("Avec évidence, on remarque que les jours avec une météo très défavorable ou défavorable ont des écarts plus importants que les jours de 'beaux temps'.")
+    fig_histo_impact_meteo = histo_impact_meteo(df_propre)
+    st.plotly_chart(fig_histo_impact_meteo)
 
 
     st.write("### 3 - Analyse différents modèles de véhicules")
@@ -379,9 +413,9 @@ def analyse_base_conso(df_propre, df_arret):
         st.write("Comme on l'a vu précédemment, il y a plus de bus que de tramway. Ce phénomène se représente également sur le nombre de ligne de bus et le nombre de ligne de tram. Il y a ", 42, " bus  uniques et ", 2, " tramways uniques.")
     col2.plotly_chart(fig_pie_bus_tram)
 
-    st.write("Observons l'évolution du nombre de bus / tramaway par ligne au cours du temps.")
-    st.write(" A REVOIR")
-    st.plotly_chart(fig_evo_bus_tram)
+    #st.write("Observons l'évolution du nombre de bus / tramaway par ligne au cours du temps.")
+    #st.write(" A REVOIR")
+    #st.plotly_chart(fig_evo_bus_tram)
 
     st.write("On peut également représenter les écarts moyens (retards ou avances) par ligne en fonction du temps sous forme d'heatmap. L'idée est de répérer les lignes ou les mois qui cummulent le plus de retards moyens.")
     st.write(" - On remarque que les plus forts retards se retrouvent dans les *petites* lignes qui se dirigent vers les sorties d'Angers (ex lignes : 13 / 15 / 30 / 31 / 32 / 41 / 46).")
@@ -416,7 +450,9 @@ def prediction_qualite_traffic(df_propre, df_result_ML, df_fichier_pour_pred_ML1
     st.write("### 2 - Construction d'une base d'entrainement ")
     st.write("L'idée est de regrouper ses informations par jour, cela implique que les écarts vont être sommés et qu'on va dénombrer par jour le nombre de bus/trams par états et le nombre de bus/tram par ligne")
 
-    st.write("L'ambition est d'avoir un jeu composé uniquement de valeurs numériques on va 'dummies' les variables jour_semaine & OPINION.") 
+    st.write("L'ambition est d'avoir un jeu composé uniquement de valeurs numériques on va encoder les variables jour_semaine & OPINION.") 
+
+    st.write("De plus, l'idée étant de prédire les valeurs la veille pour le lendemain, on va shift nos données de 1 (par date) pour avoir entrainer un modèle sur les valeurs de la veille. De ce fait, en utilisant les valeurs de la veille, on peut prédire le retard du lendemain")
     code_merge_tab = """
     # Création de la base d'entrainement
 df_date = df_pred[['date', 'month', 'day', 'jour_semaine', 'OPINION']].drop_duplicates()
@@ -441,7 +477,13 @@ df_ecart = df_ecart.groupby(['date']).sum().reset_index()
 df_pred = df_date.merge(df_etat_SAE_du_vehicule, on='date', how='left').merge(df_nom_de_la_ligne, on='date', how='left').merge(df_ecart, on='date', how='left').drop(columns=['date'])
 
 # Dummies
-df_pred = pd.get_dummies(df_pred, columns=['jour_semaine', 'OPINION'], drop_first=True)    
+df_pred = pd.get_dummies(df_pred, columns=['jour_semaine', 'OPINION'], drop_first=True)
+
+# Shift de 1
+mask = ~(df_pred.columns.isin(['month','day']))
+cols_to_shift = df_pred.columns[mask]
+df_pred[cols_to_shift] = df_pred.loc[:,mask].shift(1)
+df_pred = df_pred.dropna()
     """
     st.code(code_merge_tab, language = 'python')
     
@@ -453,7 +495,12 @@ df_pred = pd.get_dummies(df_pred, columns=['jour_semaine', 'OPINION'], drop_firs
     st.write("### 3 - Création de plusieurs modèles de prédictions ")
 
     st.write("On va tester plusieurs modèles de prédictions pour voir lequel est le plus performant. L'idée étant de prédire une variable continue on va se focaliser sur des modèles de type *régression*. On va tester :")
-    st.write("*L'ensemble des codes sont disponibles [ici](https://www.google.com/).*")
+    
+    st.write("L'utilisation de la classification ne permet pas de quantifier, or le temps se doit d'être quantifiable, ex : 'votre avion a un retard modéré' ne permet pas de quantification et donc pas de  prise de décision sur le choix d'un autre mode de transport .")
+    st.write("Utilisé la classification pour notre problématique desservirait l'objectif d'un retard perçu moindre, et ce par la perte de variabilité engendré.")
+    st.write("On peut néanmoins songé à un algorithme de CAH pour labellisé les retards prévu")
+
+    st.write("*L'ensemble des codes sont disponibles [ici](https://github.com/ClovisDel/qualite_trafic_tram_bus_angers).*")
     st.write("- *LinearRegression*")
     st.write("- *Ridge*")
     st.write("- *RandomForestRegressor*")
@@ -556,6 +603,115 @@ with open(Pkl_Filename, 'wb') as file:
         st.write("D'après notre modèle le retard sur la journée du ", jour_semaine , " ", jour , " ", mois , " est de : ", y_pred[0], "secondes ou ", round(y_pred[0]/60,2), " minutes.")
 
 
-    st.write("### 5 - Conclusion ")
+def prediction_qualite_traffic_par_ligne(df_propre, df_result_ML_2, df_fichier_pour_pred_ML1):
+    st.header("Prédiction de la qualité du traffic")
+    st.write("### 1 - Analyse du sujet ")
+    st.write("En prenant le même problème précédant, une autre analyse possible est de se positionner en tant qu'utilisateur de ses données. Généralement, un utilisateur utilise toujours la même ligne de tram ou de bus, qu'il utilise pour faire l'aller puis le retour.")
+    st.write("Nous réaliserons donc des **prévisions par lignes de bus/tram**, puisque qu'une prédiction globale n'a que peu d'intérêt pour l'utilisateur et qu'une prédiction plus précise nécessite plus de données.")
+    st.write("Pour symboliser la qualité du trafic, nous allons utiliser la variable *ecart_horaire_en_secondes* qui est une variable numérique. Cela implique d'utiliser un modèle de régression.")
+    st.write("Pour pouvoir agréger ces données par jours, nous choisissons l'agrégation de somme, cela permettra de mettre en avant la variabilité entre les lignes. Puisque plus une ligne est utilisée, plus le nombre de bus à son service est haut et donc plus de requêtes qui la concerne sont effectuées. Ainsi si une ligne est très utilisée et a de nombreux retards alors sa somme des écarts sera très importante. Cela permettra de pénaliser à hauteur de la fréquentation de la ligne. (Selon l’hypothèse bcp de voyageurs => bcp de bus en activité sur cette ligne)") 
+    st.write("Résumé : en entrée nous aurons les données agrégées de la veille en globale et les dernières données agrégées par ligne, ainsi que la ligne que nous souhaitons prédire, en sortie nous aurons la somme des écarts horaires de la ligne que nous souhaitons prédire.")    
 
-    
+    try :
+        image = Image.open('model_fonctionnement.png')
+        st.image(image, caption='model_fonctionnement')
+    except : 
+        pass
+
+    st.write("### 2 - Préparation des données ")
+
+    code_prep_data = """
+    # Si le bus/tram est arrivé en avance, on considère que l'écart horaire est nul 
+# => éviter que les bus en avance annule ceux en retards lors de l'opération de somme
+df_RLM['ecart_horaire_en_secondes'] = df_RLM['ecart_horaire_en_secondes'].apply(lambda x: 0 if x < 0 else x)
+
+# Aggrégation par jour et par ligne
+df_group = df_RLM.groupby(['date','nom_de_la_ligne']).agg(
+    {'ecart_horaire_en_secondes' : 'sum',
+     'diff_estimee' : 'sum',
+     'diff_maj' : 'sum',
+     'month' : 'first',
+     'day' : 'first',
+     'jour_semaine' : 'first',
+     'OPINION' : 'first'
+    }).merge((df_RLM
+  .groupby(["date",'nom_de_la_ligne', 'etat_SAE_du_vehicule'])
+  .size()
+  .unstack('etat_SAE_du_vehicule', fill_value=0)
+  .add_prefix("nombre_etat_")
+), on=['date','nom_de_la_ligne'], how='left')
+     		
+# Les valeurs d'écarts prochaines pour chaque ligne et la date de celles-ci
+df_group[['next_ecart','month','day','jour_semaine']] = df_group.groupby('nom_de_la_ligne')[['ecart_horaire_en_secondes','month','day','jour_semaine']].shift()
+df_group.dropna(inplace=True)       
+  
+df_group.reset_index(inplace=True, level=['nom_de_la_ligne'])
+  
+#Ajout données globales de la veille  
+df_group.merge(
+  df_RLM.groupby('date').agg({
+    'ecart_horaire_en_secondes' : 'sum',
+     'diff_estimee' : 'sum',
+     'diff_maj' : 'sum',  }).rename(columns=
+                  {'ecart_horaire_en_secondes': 'ecart_horaire_en_secondes_global',
+                   'diff_estimee' : 'diff_estimee_global',
+                   'diff_maj' : 'diff_maj_global'}), on=['date'], how='left')
+df_group = pd.get_dummies(df_group, columns=['OPINION','nom_de_la_ligne'])
+"""
+    st.code(code_prep_data, language='python')
+
+    st.write("On remarque que certains jours, il n'y a que très peu de lignes de bus actives. et certaines lignes de bus n'ont que très peu de données. On pourrait limiter notre prédiction aux lignes les plus actives.")
+    st.write("Mais cela pénaliserait les utilisateurs de petite ligne, pour régler cela nous avons réaliser le shift sur les dates en plus de la valeur à prédire. Cela permet de récupérer l'information de saisonnalité perdu lorsqu'une ligne n'est pas active chaque jour.")
+
+    st.write("### 3 - Modélisation par le modèle Prophet")
+    st.write("Dans un premier temps, essayons de prédire la variable expliqué avec uniquement la variable date. Pour cela, nous allons utiliser le modèle Prophet de Facebook. Ce modèle est basé sur la décomposition de la série temporelle en trois composantes : tendance, saisonnalité et bruit. Il est donc particulièrement adapté à la prédiction de séries temporelles à condition qu'il y ait un lien entre la variable à expliqué et la date.")
+
+    code_prophet = """
+    from prophet import Prophet
+m = Prophet()
+
+df_prophet = df_group['next_ecart'].reset_index()
+
+df_prophet = df_prophet.rename(columns={'date': 'ds', 'next_ecart': 'y'})
+train , test = train_test_split(df_prophet, test_size=0.2, random_state=0)
+m.fit(train)
+"""
+    st.code(code_prophet, language='python')
+
+    st.write("En comparant les résultats de la prédiction par la moyenne et par le modèle Prophet, on peut voir que le modèle Prophet a des performances excécrables.") 
+    st.write("Cela est dû au fait que l'horodatage ne contient peu ou pas d'information sur la variable à expliqué ou que la connaissance n'est disponible que par combinaisons avec d'autres variables.")
+    st.write("Nous pourions utiliser le modèle Prophet pour expliquer la saisonnalité et la tendance, puis entrainer des modèles de régression sur les résidus. Cependant, il s'agit d'un modèle inutilement complexe pour le nombre d'observations limités que nous avons.")
+    st.write("Continuons dans les modèles explicables avec une régression linéaire multiple qui implique un lien linéaire entre la variable à expliqué et les variables explicatives.")
+
+    st.write("### 4 - Analyse des liens entre nos variables")
+    st.write("Avant d'utiliser nos modèles vu précédement nous allons essayer de tirer les liens polynomiaux entre nos variables")
+    code_poly = """
+    from sklearn.preprocessing import PolynomialFeatures
+poly = PolynomialFeatures(degree=2, interaction_only=True)
+poly.fit(Xtrain)
+Xtrain_poly = poly.transform(Xtrain)
+Xtest_poly = poly.transform(Xtest)
+Xtrain_poly.shape
+"""
+    st.code(code_poly, language='python')
+    st.write("Cependant, il en ressort", 2347 ,"collones à cause de nos variables qualitative mis en one-hot-encoding.")
+    st.write("Ce qui détruirait l'explicabilité, alors que cela est l'objectif d'avoir un modèle simple.")
+
+    st.write("### 5 - Modélisation par la régression linéaire multiple")
+    st.write("Suite à cette modélisation, nous appliquons les modèles vu précédement sur nos données.")
+    st.write("*L'ensemble des codes sont disponibles [ici](https://github.com/ClovisDel/qualite_trafic_tram_bus_angers).*")
+    st.write("On obtient les résultats suivant") 
+
+    df_result_ML_2["MAPE"] = df_result_ML_2["MAPE"].apply(lambda x: '%.2E' % x)
+    df_result_ML_2["MSE"] = df_result_ML_2["MSE"].apply(lambda x: '%.2E' % x)
+    df_result_ML_2["MAE"] = df_result_ML_2["MAE"].apply(lambda x: '%.2E' % x)
+    _, col, _ = st.columns([1, 3, 1])
+    col.dataframe(df_result_ML_2)
+
+    #model2 = load_model2()
+
+    st.write("### 5 - Conclusion")
+
+    st.write("Nous avons pu créer un modèle qui prédis le trafic le lendemain en exprimant 92% de la variabilité et 89% si l’on sélectionne la ligne à prédire, ces modèles sont respectivement 7 et 4.5 fois meilleur que la prédiction par la moyenne en terme de MAE.")
+    st.write("Mais nous ne pouvons ignorer ses biais puisqu’il n’a été entrainé que sur 128 jours. Cela nous a permis de nous rendre compte de l’importance du contrôle de la donnée, qu’il ne suffisait pas d’avoir des centaines de milliers de lignes pour abattre n’importe quelle problématique. ")
+    st.write("De plus, ce projet a permis de consolider nos connaissances en data science, et nous avons déjà pu mettre en application nos nouvelles compétences en data visualisation dans nos entreprises respectives avec succès.")

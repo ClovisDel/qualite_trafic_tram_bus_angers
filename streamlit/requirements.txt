@@ -1,0 +1,8 @@
+plotly
+streamlit-folium
+scipy
+sklearn==0.0
+gsheetsdb
+pyparsing
+openpyxl
+streamlit==1.15.1

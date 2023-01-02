@@ -77,6 +77,31 @@ def graph_winsorizing(df):
     return fig, fig1
 
 @st.cache(suppress_st_warning=True)
+def ecart_horodatage(df):
+    fig = px.histogram(df, x="horodatage_fichier",
+                   title="Distribution des Horodatage_fichier", color='jour_semaine',
+                )
+    fig.update_layout(
+        xaxis_title="Date", yaxis_title="Nombre de fichiers concernés"
+    )
+    return fig
+
+@st.cache(suppress_st_warning=True)
+def distrib_ecart_horo_fichier(df):
+    df["ecart_horodatage_fichier"] = abs(
+    df["horodatage"] - df["horodatage_fichier"])
+    sorted_ecart_horodatage = df[df["ecart_horodatage_fichier"] > pd.Timedelta(
+        "1 hour")].sort_values(by="ecart_horodatage_fichier", ascending=False)
+
+    fig = px.histogram(sorted_ecart_horodatage, x="ecart_horodatage_fichier",
+                    title="Distibution des écarts supérieur à 1 heure entre l'horodatage du fichier et<br>l'horodatage du bus",
+                    )
+    fig.update_layout(
+        xaxis_title="Ecart en seconde", yaxis_title="Nombre de fichiers concernés"
+    )
+    return fig
+
+@st.cache(suppress_st_warning=True)
 def mean_ecart_value(df):
     df_mean_ecart = df[['date', 'ecart_horaire_en_secondes']]
     df_mean_ecart = df_mean_ecart.groupby(['date']).sum().reset_index()
@@ -152,6 +177,12 @@ def heatmap_ecart(df):
 
     fig = px.imshow(df_heatmap_ecart, labels=dict(x="Jour", y="Mois", color="Ecart en seconde", height=1000, width=500, aspect="auto"))
 
+    return fig
+
+@st.cache(suppress_st_warning=True)
+def histo_impact_meteo(df):
+    mean_of_ecart_by_OPINION = df.groupby("OPINION")["ecart_horaire_en_secondes"].mean().sort_values(ascending=False)
+    fig = px.bar( x=mean_of_ecart_by_OPINION.index, y=mean_of_ecart_by_OPINION.values)
     return fig
 
 @st.cache(suppress_st_warning=True)
